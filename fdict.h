@@ -33,10 +33,10 @@ typedef struct dictIter{
 }dictIter;
 
 typedef struct dictType{
-    unsigned int (* HashFunc)(const unsigned char * key, const size_t len);
-    int    (* CmpKeys)(const void * key1, const void * key2);
-    void * (* DupKey)(const void * key);
-    void * (* DupVal)(const void * value);
+    unsigned int (* HashFunc)(void * key);
+    int    (* CmpKeys)(void * key1, void * key2);
+    void * (* DupKey)(void * key);
+    void * (* DupVal)(void * value);
     void   (* DesKey)(void * key);
     void   (* DesVal)(void * value);
 }dictType;
@@ -56,46 +56,49 @@ typedef struct fdict{
 /******************** constants **************************/
 #define FDICT_HEADER_INITIAL_SIZE 4
 /************************macros***************************/
-/* if DupKey is not null, then means string should be duplicated, either the
-** string just linked */
-#define fdictSetKey(d, node, key) \
-    if((d)->type->DupKey){ \
-        (node)->key = (d)->type->DupKey(key); \
-    }else{ \
-        (node)->key = key; \
+/* if DupKey is not null,
+** then means string should be duplicated,
+** either the string just linked */
+#define fdictSetKey(d, node, key)				\
+    if((d)->type->DupKey){						\
+        (node)->key = (d)->type->DupKey(key);	\
+    }else{										\
+        (node)->key = key;						\
     }
-/* if Deskey is not null, means string had been duplicated, then memeroy 
-** should be freed,either set the pointer NULL */
-#define fdictFreeKey(d, node) \
-    if((d)->type->DesKey){ \
-        (d)->type->DesKey((node)->key); \
-    }else{ \
-        (node)->key = NULL; \
+/* if Deskey is not null,
+** means string had been duplicated,
+** then memeroy should be freed,
+** either set the pointer NULL */
+#define fdictFreeKey(d, node)					\
+    if((d)->type->DesKey){						\
+        (d)->type->DesKey((node)->key);			\
+    }else{										\
+        (node)->key = NULL;						\
     }
 /* value has three situations, follow one then is in condition that value is 
 ** string, its mechanism as same as the "fdictSetKey".  */
-#define fdictSetVal(d, node, value) \
-    if((d)->type->DupVal){ \
-        (node)->value.val = (d)->type->DupVal(value); \
-    }else{ \
-        (node)->value.val = value; \
+#define fdictSetVal(d, node, value)				\
+    if((d)->type->DupVal){								\
+        (node)->value.val = (d)->type->DupVal(value);	\
+    }else{												\
+        (node)->value.val = value;				\
     }
-#define fdictSetIntVal(d, node, value) do{ \
+#define fdictSetIntVal(d, node, value) do{		\
     (node)->value.s64 = value; } while(0)
-#define fdictSetUIntVal(d, node, value) do { \
+#define fdictSetUIntVal(d, node, value) do {	\
     (node)->value.u64 = value; } while(0)
-#define fdictFreeVal(d, node) \
-    if((d)->type->DesVal){ \
-        (d)->type->DesVal((node)->value.val); \
-    }else{ \
-        (node)->value.val = NULL; \
+#define fdictFreeVal(d, node)					\
+    if((d)->type->DesVal){						\
+        (d)->type->DesVal((node)->value.val);	\
+    }else{										\
+        (node)->value.val = NULL;				\
     }
     
-#define fdictCmpKeys(d, key1, key2) \
+#define fdictCmpKeys(d, key1, key2)				\
     ((d)->type->CmpKeys(key1, key2))
-#define fdictHash(d, key, len) \
-    ((d)->type->HashFunc(key, len));
-#define fdictIsRehash(d) \
+#define fdictHash(d, key)					\
+    ((d)->type->HashFunc(key))
+#define fdictIsRehash(d)						\
     ((d)->rehash_index != -1)
 
 /******************** API ****************************/
@@ -106,20 +109,26 @@ int fdictGetRandSeed();
 fdict * fdictCreate();
 void fdictEmpty(fdict *);
 void fdictFree(fdict *);
-int fdictAddRaw(fdict * dict, const unsigned int hash, void *, void *);
+int fdictAddRaw(fdict * dict, const unsigned int hash,
+				void *, void *);
 int fdictAdd(fdict * dict, void * key, void * value);
 void fdictRemove(fdict * dict, void * key);
 dictNode * fdictPop(fdict * dict, void * key);
 int fdictSet(fdict * dict, void * key, void * value);
 int fdictReplace(fdict * dict, void * key, void * value);
 dictNode * fdictSearch(fdict * dict, void * value);
-dictNode * fdGetRandom(fdict * dict);
+dictNode * fdictGetAt(fdict * dict, const size_t index);
+dictNode * fdictGetRandom(fdict * dict);
 dictIter * fdictIterCreate(fdict * dict, char * key);
 dictIter * fdictIterNext(fdict * dict, dictIter * iter);
 void fdictIterCancel(fdict * dict, dictIter * iter);
+void fdictInfo(fdict * dict);
+
 /******************* hash type ************************/
-extern dictType hashTypeDupKeyVal;
-extern dictType hashTypeDupKey;
-extern dictType hashTypeLnkKeyVal;
+extern dictType dictTypeDupKeyVal;
+extern dictType dictTypeDupKey;
+extern dictType dictTypeLnkKeyVal;
+extern dictType dictTypeCmdTable;
+extern dictType dictTypeSvrTable;
 
 #endif

@@ -65,13 +65,13 @@ static void _RLRotate(treeNode ** p){
 }
 
 /* chosing the balance method
-   and adjusting balance factors */
+** and adjusting balance factors */
 static int _Balance(treeNode ** p){    
     int c_bf;
     switch((*p)->bf){
-    case 2://choising rotate type
+    case 2:/* choising rotate type */
         switch((*p)->left->bf){
-        case 0://R
+        case 0:/* R */
             (*p)->bf = 1;
             (*p)->left->bf = -1;
             _RRotate(p);
@@ -123,7 +123,9 @@ static int _Balance(treeNode ** p){
             return 0;
         }
         break;
-    default://AVL tree has been destroyed,something needed to rebuild struct
+		/* AVL tree has been destroyed
+		** something needed to rebuild struct */
+    default:
         return 0;
     }
 }
@@ -141,30 +143,30 @@ static int _Insert(treeNode ** p,const ssize_t key,void * value){
         *p = new;
         return 1;
     }
-    int c_bf; //child->bf
-    //find the right position before the insertion point
-    if(key < (*p)->key){//left
+    int c_bf; /* child->bf */
+    /* find the right position before the insertion point */
+    if(key < (*p)->key){/* left */
         switch(_Insert(&(*p)->left, key, value)){
-        case 1: //inserted as left leaf
+        case 1: /* inserted as left leaf */
             ++(*p)->bf;
             return 2;
-        case 2: //have inserted in it's children,someone; 
+        case 2: /* have inserted in it's children,someone */ 
             c_bf = (*p)->left->bf;
-            if(c_bf == 0) return 0;//p->left's depth didn't change
-            else if(c_bf == 1 || c_bf == -1){//p->left's depth increased
-                if(++(*p)->bf == 2){//balance action needed,then work done
+            if(c_bf == 0) return 0;/* p->left's depth didn't change */
+            else if(c_bf == 1 || c_bf == -1){/* p->left's depth increased */
+                if(++(*p)->bf == 2){/* balance action, then work done */
                     _Balance(p);
                     return 0;
                 }
                 return 2;
             }else return -1;
-        case 0: return 0; //inserted,already balanced;
-        case -2: return -2;//key already exist, no action done  
-        default: return -1; // -1 returned, mem failed, no action done   
+        case 0: return 0; /* inserted,already balanced */
+        case -2: return -2;/* key already exist, no action done */ 
+        default: return -1; /* -1 returned, mem failed, no action done */   
         }
-    }else if(key > (*p)->key){//right
+    }else if(key > (*p)->key){/* right */
         switch(_Insert(&(*p)->right, key, value)){
-        case 1: //inserted as right leaf
+        case 1: /* inserted as right leaf */
             --(*p)->bf;
             return 2;
         case 2:
@@ -199,39 +201,33 @@ int fbintreeInsert(fbintree * tree, const ssize_t key, void * value){
 
 static int _Delete(treeNode ** p, const ssize_t key, void * r){
     int c_bf;
-    if((*p) == NULL){//search faild
-        return -1; 
+    if((*p) == NULL){/* search faild */
+        return -1;
     }
     if(key < (*p)->key){
         switch(_Delete(&(*p)->left, key, r)){
-        case -1: return -1;//faild
-        case  0: return 0;//already balance
-        case  1://just delete one
-            if(--(*p)->bf == -2){
-                _Balance(p);
-                return 0;
-            }
+        case  0: return 0;/* already balance */
+        case  1:/* just delete a leaf node */
+            --(*p)->bf;            
             return 2;
         case  2:
             c_bf = (*p)->left->bf;
-            if(c_bf == 0){//depth decresed
+            if(c_bf == 0){/* depth decresed */
                 if(--(*p)->bf == -2){
                     _Balance(p);
                     return 0;
                 }
                 return 2;
-            }else if(c_bf == 1 || c_bf == -1) return 0;//depth didn't change
+            }else if(c_bf == 1 || c_bf == -1)/* depth didn't change */
+				return 0;
             else return -1;
+		case -1: return -1;//faild
         }
     }else if(key > (*p)->key){
         switch(_Delete(&(*p)->right, key, r)){
-        case -1: return -1;
         case  0: return 0;
         case  1:
-            if(++(*p)->bf == 2){
-                _Balance(p);
-                return 0;
-            }
+            ++(*p)->bf;
             return 2;
         case 2:
             c_bf = (*p)->right->bf;
@@ -243,46 +239,62 @@ static int _Delete(treeNode ** p, const ssize_t key, void * r){
                 return 2;
             }else if(c_bf == 1 || c_bf == -1) return 0;
             else return -1;
+		case -1: return -1;
         }
-    }else{//got it
+    }else{/* got it */
         treeNode t;
-        treeNode * m;
-        r = (*p)->value;//get the value
-        if((*p)->bf == 0 || (*p)->bf == 1){
-            if((*p)->left){//depth wouldn't change
-                //find the maxmum one to exchange in left children
-                //then m->right is leaf;
-                m = (*p)->left;
-                while(m && m->right) m = m->right;
-                //do exchange
-                t.key = m->key;
-                t.value = m->value;
-                m->key = (*p)->key;
-                m->value = (*p)->value;
-                (*p)->key = t.key;
-                (*p)->value = t.value;
-                --(*p)->bf;
-                return _Delete(&(*p)->left, key, r);
-            }else{//p is leaf,and only p->bf=0 could p->left is NULL
-                *p = NULL;
-                return 1;
-            }
+        treeNode * m, * q;
+        r = (*p)->value;/* get the value */
+		
+        if((*p)->bf == 1){
+			/* find the p->left's maximum childnode
+		    ** link p->right to it,then adjust the balanced
+			** then replace p with p->left, free old p's memory */
+			m = (*p)->left;
+			while(m->right) m = m->right;
+			m->right = (*p)->right;
+
+			t.key = (*p)->key;
+			t.value = (*p)->value;
+			(*p)->key = m->key;
+			(*p)->value = m->value;
+			m->key = t.key;
+			m->value = t.value;
+			
+			return _Delete(p, key, r);
+		}else if((*p)->bf == 0){
+            if((*p)->left){/* same action as (*p)->bf == 1 */
+				m = (*p)->right;
+				while(m->left) m = m->right;
+				m->left = (*p)->left;
+				q = *p;
+				m = (*p)->right;
+				if((*p)->left)
+					if(++m->bf == 2) _Balance(&m);
+				*p = m;
+				free(q);
+				return 2;			
+			}else{/* left node */
+				q = *p;
+				*p = NULL;
+				free(q);
+				return 1;
+			}
         }else if((*p)->bf == -1){
-        //find the minimum one to exchange in right children
-            m = (*p)->right;
-            while(m && m->left) m = m->left;
-            //do exchange
-            t.key = m->key;
-            t.value = m->value;
-            m->key = (*p)->key;
-            m->value = (*p)->value;
-            (*p)->key = t.key;
-            (*p)->value = t.value;
-            ++(*p)->bf;
-            return _Delete(&(*p)->right, key, r);
+			m = (*p)->right;
+			while(m->left) m = m->left;
+			m->left = (*p)->left;
+
+			t.key = (*p)->key;
+			t.value = (*p)->value;
+			(*p)->key = m->key;
+			(*p)->value = m->value;
+			m->key = t.key;
+			m->value = t.value;
+			
+			return _Delete(p, key, r);
         }else return -1;    
     }
-
 }
 
 treeNode * fbintreeSearch(fbintree * tree, const ssize_t key){
@@ -315,41 +327,41 @@ static void InorderTraverse(treeNode * root){
     printf(")");
 }
 
-/*int main(){
-    int data[] = {8,5,1};
-    fbintree tree;
-    treeNode root,a,b,c;
-    root.left = root.right = NULL;
-    a.left = a.right = NULL;
-    b.left = b.right = NULL;
-    c.left = c.right = NULL;
-    root.bf = a.bf = b.bf = c.bf = 0;
+/* int main(){ */
+/*     int data[] = {8,5,1}; */
+/*     fbintree tree; */
+/*     treeNode root,a,b,c; */
+/*     root.left = root.right = NULL; */
+/*     a.left = a.right = NULL; */
+/*     b.left = b.right = NULL; */
+/*     c.left = c.right = NULL; */
+/*     root.bf = a.bf = b.bf = c.bf = 0; */
     
-    tree.root = NULL;
+/*     tree.root = NULL; */
 
-    printf("\n");
-    int f = -1;
-    for(int i = 0; i <= 10; ++i){
-        int n = rand()%100;
-        int result = fbintreeInsert(&tree, n, (void *)data);
-        /*if(result == 1){
-            printf("%d success\n", n);
-        }else if(result == 2){
-            printf("%d already exist\n", n);
-        }else{
-            printf("%d faild,mem error\n", n);
-        }
-    }
-    InorderTraverse(tree.root);
-    void * r;
+/*     printf("\n"); */
+/*     int f = -1; */
+/*     for(int i = 0; i <= 10; ++i){ */
+/*         int n = rand()%100; */
+/*         int result = fbintreeInsert(&tree, n, (void *)data); */
+/*         /\* if(result == 1){ *\/ */
+/*         /\*     printf("%d success\n", n); *\/ */
+/*         /\* }else if(result == 2){ *\/ */
+/*         /\*     printf("%d already exist\n", n); *\/ */
+/*         /\* }else{ *\/ */
+/*         /\*     printf("%d faild,mem error\n", n); *\/ */
+/*         /\* } *\/ */
+/*     } */
+/*     InorderTraverse(tree.root); */
+/*     void * r; */
     
-    printf("\n%d", _Delete(&tree.root, 62, r));
-    InorderTraverse(tree.root);   
+/*     printf("\n%d", _Delete(&tree.root, 15, r)); */
+/*     InorderTraverse(tree.root);    */
     
-    printf("\n");
+/*     printf("\n"); */
     
-    return 0;
-}*/
+/*     return 0; */
+/* } */
 
 
 

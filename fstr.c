@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> 
+#include <string.h>
+#include <ctype.h>
 #include "common.h"
 #include "fstr.h"
 
 fstr * fstrCreateLen(const char * str, const size_t len){
     fstr * p;
-	if(NULL == (p = (fstr *)malloc(sizeof(fstr) + len + 1))) return NULL;
+	if(NULL == (p = (fstr *)malloc(sizeof(fstr) + len + 1)))
+		return NULL;
 	
 	if(str != NULL){
 		size_t str_len = strlen(str);
@@ -29,7 +31,7 @@ fstr * fstrCreate(const char * str){
 
 fstr * fstrCreateInt(const int64_t value){
 	fstr * p;
-	if(NULL == (p = (fstr *)malloc(sizeof(fstr) + sizeof(int64_t))))
+	if(!(p = (fstr *)malloc(sizeof(fstr) + sizeof(int64_t))))
 		return NULL;
 
 	memcpy(p->buf, &value, sizeof(value));
@@ -38,28 +40,30 @@ fstr * fstrCreateInt(const int64_t value){
 }
 
 void fstrFree(fstr * str){
-	free(str->buf);
 	free(str);
 }
 
 fstr * fstrCatLen(fstr * a, const char * b, const size_t len){
     fstr * p = a;    
     int newfree = a->free - len;
-    if(a->free < len){   //space not enough,realloc double space of which needed
+	int flag = 0;
+	
+	/* space not enough,realloc double space of which needed */
+	if(a->free < len){
         if(NULL == (p = (fstr *)malloc(sizeof(fstr) + (p->len + len) * 2 + 1)))
 			return NULL;
         memcpy(p->buf, a->buf, a->len);
         newfree = a->len + len;
+		flag = 1;
     }
-    //complete cat
+    /* complete cat */
     memcpy(p->buf + a->len, b, len);
     p->buf[a->len + len] = '\0';
     
     p->len = a->len + len;
     p->free = newfree;
 
-	free(a);
-	a = p;
+	if(flag) free(a);
 	
     return p;
 }
@@ -102,6 +106,36 @@ fstr * fstrTrim(fstr * p, const int FLAG){
     return p;
 }
 
+/* replace chars which length len */
+fstr * fstrSetLen(fstr * s, char * str, const size_t start, const size_t len){
+	fstr * p = s;
+
+	if(start > p->len)/* out of bound */
+		return NULL;
+	
+	if(p->len + p->free < len + start){/* space need realloc */
+		if(!(p = (fstr *)malloc(sizeof(fstr) +
+								((len + start) << 1) + 1)))
+			return NULL;
+
+		memcpy(p->buf, s->buf, start);
+		p->len = p->free = len + start;
+		fstrFree(s);
+	}else{
+		p->free = p->free + p->len - len - start;
+		p->len = len + start;
+	}
+	
+	memcpy(p->buf + start, str, len);
+	*(p->buf + start + len) = '\0';
+
+	return p;
+}
+
+fstr * fstrSet(fstr * p, char * str, const size_t start){
+	return fstrSetLen(p, str, start, strlen(str));
+}
+
 fstr * fstrRemoveLen(fstr * p, const size_t start, const size_t len){
     int i, j;
     i = min(start, start + len);
@@ -115,14 +149,16 @@ fstr * fstrRemoveLen(fstr * p, const size_t start, const size_t len){
     return p;
 }
 
-fstr * fstrCopyLen(fstr * a, const size_t start, const size_t len){
+fstr * fstrDupLen(fstr * a, const size_t start, const size_t len){
     int i, j;
     i = min(start, start + len);
     j = max(start, start + len);
-    if(i >= a->len || i < 0 || j < 0 || j > a->len) return NULL;
+    if(i >= a->len || i < 0 || j < 0 || j > a->len)
+		return NULL;
     
     fstr * p;
-	if(NULL == (p = (fstr *)malloc(sizeof(fstr) + len + 1))) return NULL;
+	if(NULL == (p = (fstr *)malloc(sizeof(fstr) + len + 1)))
+		return NULL;
     p->len = j - i;
     p->free = 0;
     
@@ -132,11 +168,34 @@ fstr * fstrCopyLen(fstr * a, const size_t start, const size_t len){
     return p;
 }
 
-fstr * fstrCopy(fstr * a){
-    return fstrCopyLen(a, 0, strlen(a->buf));
+fstr * fstrDup(fstr * a){
+    return fstrDupLen(a, 0, strlen(a->buf));
 }
 
-fstr * fstrReplaceLen(fstr * a, char * b, const size_t pos, const size_t len){
+/* copy 'b' to 'a' till 'c' appear in 'b',
+** original content of 'a' will be covered and cleared */
+fstr * fstrDupEndPoint(fstr * b, const char c){
+	fstr * p;
+	int i = 0;
+	
+	while(i < b->len && b->buf[i] != c )
+		++i;
+	if(i == b->len) return NULL; /* no 'c' appear */
+
+	if(NULL == (p = (fstr *)malloc(
+					sizeof(fstr) + ((i + 2) << 1 ) * sizeof(char))))
+		return NULL;
+
+	p->free = p->len = i + 1;
+	
+	memcpy(p->buf, b->buf, i + 1);
+	p->buf[p->len] = '\0';
+	
+	return p;
+}
+
+fstr * fstrReplaceLen(fstr * a, char * b,
+					  const size_t pos, const size_t len){
 	if(pos >= a->len) return NULL;
 
 	size_t str_len = strlen(b);
@@ -169,7 +228,6 @@ fstr * fstrInsertLen(fstr * a, char * b, const size_t pos, const size_t len){
 		memcpy(p->buf + pos + str_len, a->buf + pos, a->len - pos);
 		
 		free(a);
-		a = p;
 	}else{
 		p->free -= str_len;
 		p->len += str_len;
@@ -184,6 +242,45 @@ fstr * fstrInsertLen(fstr * a, char * b, const size_t pos, const size_t len){
 
 fstr * fstrInsert(fstr * a, char * b, const size_t pos){
 	return fstrInsertLen(a, b, pos, strlen(b));
+}
+
+/* clear invisiblily characters in the string */
+void fstrSqueeze(fstr * a){
+	size_t i, s = 0, l = 0;
+	int re, flag = 0;
+	
+	for(i = 0; i < a->len; ++i){
+		re = isspace(a->buf[i]);
+		if(re && 0 == flag){/* start count space characters */
+			s = i;
+			++l;
+
+			flag = 1;
+		}else if(re && 1 == flag){/* counting */
+			++l;
+
+			if(i == a->len - 1){/* end of string */
+				a->len -= l;
+				a->free += l;
+				
+				return;
+			}
+			
+		}else if(!re && 1 == flag){
+			/* counting complete */
+			/* clear invisiblity characters by memcpy */
+			memcpy(a->buf + s, a->buf + s + l, a->len - s - l);
+			a->len -= l;
+			a->free += l;
+			i -= l;
+			l = 0;
+
+			flag = 0;
+		}else{/* nothing */
+
+		}
+	}
+	
 }
 
 int fstrCompare(fstr * a, fstr * b){
@@ -201,7 +298,7 @@ int fstrCompare(fstr * a, fstr * b){
     return 0;
 }
 
-static void fstrInfo(fstr * p){
+void fstrInfo(fstr * p){
     if(p == NULL){
         printf("null\n");
         return;
@@ -212,23 +309,43 @@ static void fstrInfo(fstr * p){
     printf(";length=%d,free=%d\n", p->len, p->free);
 }
 
-/*int main(){
-    char str_key[] = "     qwert  yuiop[]|   ";
-    char str_value[] = "qqqqqwwwwweeeeerrrrrttttt";
-    char str_value1[] = "sssssss";
-    char str_value2[] = "ssssss1";
+/* int main(){ */
+/*     char str_key[] = "     qwert  yuiop[]|   "; */
+/*     char str_value[] = "qqqqqwwwww"; */
+/*     char str_value1[] = "qweuuurtyuuudu"; */
+/*     char str_value2[] = "ssssss1"; */
     
-    fstr * p = fstrCreate(str_value);
-    fstr * p1 = fstrCreate(str_value1);
-    fstr * p2 = fstrCreate(str_value2);
-    fstrInfo(p);
-    
-    //printf("%d %d %d\n", fstrCompare(p, p), fstrCompare(p1, p2),
-    //                fstrCompare(p1, p));
+/*     fstr * p = fstrCreate(str_value); */
+/*     fstr * p1 = fstrCreate(str_value1); */
+/*     fstr * p2 = fstrCreate(str_value2); */
+/*     fstrInfo(p); */
+/* 	p = fstrSetLen(p, "sssss", 10, 1); */
+/* 	fstrInfo(p); */
+
+/* 	/\* fstrSqueeze(p1); *\/ */
+/* 	/\* fstrInfo(p1); *\/ */
 	
-	p = fstrInsertLen(p, "bbbbbdafdaf", 25, 5);
-	fstrInfo(p);
-    p = fstrInsertLen(p, "ccccc", 0, 3);
-	fstrInfo(p);
-    return 0;
-	}*/
+/*     /\* printf("%d %d %d\n", fstrCompare(p, p), fstrCompare(p1, p2), *\/ */
+/*     /\*                 fstrCompare(p1, p)); *\/ */
+	
+/* 	/\* p = fstrInsertLen(p, "bbbbbdafdaf", 10, 5); *\/ */
+/* 	/\* fstrInfo(p); *\/ */
+/*     /\* p = fstrInsertLen(p, "ccccc", 0, 3); *\/ */
+/* 	/\* fstrInfo(p); *\/ */
+/* 	/\* fstr * re = fstrDupEndPoint(p1, '6'); *\/ */
+/* 	/\* fstrInfo(re); *\/ */
+	
+/* 	/\* re = fstrDupEndPoint(p1, 'd'); *\/ */
+/* 	/\* fstrInfo(re); *\/ */
+
+/* 	/\* re = fstrCopyEndPoint(p, p1, 'u'); *\/ */
+/* 	/\* printf("copy re:%d\n", re); *\/ */
+/* 	/\* fstrInfo(p); *\/ */
+
+/* 	/\* re = fstrCopyEndPoint(p, p1, 'r'); *\/ */
+/* 	/\* printf("copy re:%d\n", re); *\/ */
+/* 	/\* fstrInfo(p); *\/ */
+/* 	/\* fstrFree(p1); *\/ */
+	
+/* 	return 0; */
+/* } */
