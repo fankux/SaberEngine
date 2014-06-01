@@ -16,7 +16,7 @@
 
 #define cpystr(dest, org, len) ({				\
 			memcpy((dest), (org), (len));		\
-			dest[(len)] = '\0';					\
+			(dest)[(len)] = '\0';				\
 		})
 int KeySplit(char * buf, size_t * sec_len,
 			   char ** start, char ** next);

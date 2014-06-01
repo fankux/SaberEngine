@@ -61,10 +61,12 @@ int KeySplit(char * buf, size_t * sec_len,
 ** if syntax error, return -1 */
 int ValueSplit(char * buf, size_t * sec_len,
 			   char ** start, char ** next){
+	char * s;
 	char end;
 	int len = 0, num_flag = 1;
 
 	while(*buf == ' ') ++buf; /* skip spaces */
+
 	if(!*buf) return 0;
 	if('\"' == *buf){
 		end = '\"';
@@ -72,12 +74,14 @@ int ValueSplit(char * buf, size_t * sec_len,
 	}
 	else end = ' ';
 	if(start) *start = buf;
+	s = buf;
 	while(*buf != end){
 		if(!*buf){
 			if('\"' == end) return -1; /* " must match */
 			break;
 		}
-		if(*buf > '9' || *buf < '0' || '\"' == end) num_flag = 0;
+		if(buf == s && '-' == *buf) num_flag = 1;
+		else if(*buf > '9' || *buf < '0' || '\"' == end) num_flag = 0;
 		++buf;
 		++len;
 	}

@@ -1,5 +1,5 @@
-#include "saber.h"
 #include <stdlib.h>
+#include "saber.h"
 
 /* initialized a stab struct */
 stab * stabCreate(){
@@ -13,8 +13,10 @@ stab * stabCreate(){
 
 	if(!(new->table = fdictCreate()))
 		goto err;
-	if(!(new->expire = fdictCreate()))
-		goto err;
+
+	new->table->type = &dictTypeStabTable;
+	/* if(!(new->expire = fdictCreate())) */
+	/* 	goto err; */
 
 	return new;
 

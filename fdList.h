@@ -55,9 +55,11 @@ typedef struct fdListIter{
 fdList * fdListCreate(void);
 void fdListFree(fdList * list);
 int fdListSet(fdList * list, const size_t index, void * value);
+int fdListInsert(fdList * list, void * value, void * pivot, 
+				 const uint8_t aorb);
 int fdListGet(fdList * list, void * value, fdListNode ** p);
 int fdListAddHead(fdList * list, void * value);
-int fdListAddTail(fdList * list, void * value);
+int fdListAddTail(fdList * list, void * value); 
 fdListNode * fdListPopHead(fdList * list);
 fdListNode * fdListPopTail(fdList * list);
 int fdListRemove(fdList * list, void * value,
@@ -69,12 +71,17 @@ int fdListRemoveAt(fdList * list, const size_t pos,
 fdListNode * fdListGetIndex(fdList *list , const size_t index);
 fdListNode * fdListGetRandom(fdList * list, const int seed);
 int fdListIndexOf(fdList * list, void * value);
-
 fdListIter * fdListIterCreate(fdList * p, const uint8_t direct,
 							  const size_t start_pos);
 fdListNode * fdListIterNext(fdListIter * iter);
 void fdListIterCancel(fdListIter * iter);
 void fdListIterRewind(fdList * list, fdListIter * iter);
 void fdListInfo(fdList * list);
+
+/**** function type ****/
+extern int fdListCmpInt(void * a, void * b);
+extern int fdListCmpCaseStr(void * a, void * b);
+extern int fdListCmpStr(void * a, void * b);
+
 
 #endif /* fdList.h */

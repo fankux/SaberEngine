@@ -1,13 +1,14 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include "saber.h"
+#include <string.h>
+#include <signal.h>
+#include <ctype.h>
 
 /* shared const */
 sshare shared = {
 	"\r\n",
 	"+ok\r\n",
 	"+success\r\n",
+	"+yes\r\n",
 	"-none\r\n",
 	"-faild\r\n",
 	"-arguement error\r\n",
@@ -22,18 +23,26 @@ sshare shared = {
 
 ssvr server;
 
+static void SaberExitHandler(int i){
+	SaberEngineExit();
+}
+
 /* API Implements */
 void SaberEngineStart(){
-	/* initial server data struct */
+	/* register for exit signal */
+	signal(SIGINT, SaberExitHandler);
+	signal(SIGTERM, SaberExitHandler);
+	
+	/* initialize server data struct */
 	if(!(server.client_list = fdListCreate()))
 	   	exit(EXIT_FAILURE);
 
-	/* all users' table are in a fdict, key is user id */
-	if(!(server.table = fdictCreate()))
+	/* all users' table are in a fdict, key is user's ip */
+	if(!(server.table = stabCreate()))
 		exit(EXIT_FAILURE);
-	server.table->type = &dictTypeSvrTable;
+	/* server.table->type = &dictTypeSvrTable; */
 
-	/* initial command table */
+	/* initialize command table */
 	if(!(server.command = fdictCreate()))
 		exit(EXIT_FAILURE);
 	server.command->type = &dictTypeCmdTable;
@@ -44,13 +53,28 @@ void SaberEngineStart(){
 	server.port = SABER_SERVER_PORT;
 
 	server.event_list_len = SABER_SERVER_CLIENT_MAX;
-	if(!(server.event_list =
-		(struct epoll_event *)malloc(server.event_list_len *
-									 sizeof(struct epoll_event))))
+	if(!(server.event_list = malloc(server.event_list_len *
+									sizeof(struct epoll_event))))
 		exit(EXIT_FAILURE);
+
+	memcpy(server.persist_file, "localdata", sizeof("localdata"));
 
 	/* classify the command_list */
 	CommandCat();
+}
+
+void SaberEngineExit(){
+	printf("SaberEngine exit!ByeBye!\n");
+	
+	/* close persistence child process */
+	kill(server.persist_pid, SIGINT);
+
+	//waitpid(server.persist_pid);
+
+	/* make epoll event loop exit */
+	close(server.epoll_fd);
+	close(server.listen_fd);
+	
 }
 
 sclnt * sclntCreate(int fd, unsigned int ip){
@@ -78,17 +102,17 @@ sclnt * sclntCreate(int fd, unsigned int ip){
 	new->authed = 1;
 	new->ip = ip;
 
-	/* initial users private table, is a saberTable */
-	if(!(new->table = stabCreate()))
-		return NULL;
-	new->table->id = fdListLen(server.client_list);
+	/* initial users private table,its a saberTable */
+	/* if(!(new->table = stabCreate())) */
+	/* 	return NULL; */
+	/* new->table->id = fdListLen(server.client_list); */
+	new->table = server.table;
 	if(!(new->result = fstrCreate(NULL)))
 		goto err;
-	re = fdictAdd(server.table, &new->table->id,
-				  (void *)new->table);
-	if(re != FDICT_OK){
-		goto err;
-	}
+	/* if(FDICT_OK != (re = fdictAdd(server.table, &new->ip, */
+	/* 							  (void *)new->table))) */
+
+	/* goto err; */
 
 	return new;
 
@@ -97,8 +121,6 @@ err:
 	return NULL;
 }
 void sclntFree(sclnt * c){
-	if(c->table)
-		stabFree(c->table);
 	if(c->name)
 		sobjFree(c->name);
 	if(c->argv)
@@ -129,9 +151,10 @@ sobj * sobjCreateStringLen(char * str, size_t len){
 
 sobj * sobjCreateStringInt(const int64_t value){
 	sobj * o;
-	if(!(o = (sobj *)malloc(sizeof(sobj)))) return NULL;
 	
 	if(value >= INT32_MIN && value <= INT32_MAX){
+		if(!(o = (sobj *)malloc(sizeof(sobj))))
+			return NULL;
 		o->type = SABER_STRING;
 		o->encode = SABER_ENCODE_INTEGER;
 		//if value less then 4 bytes, just cast to a pointer value
@@ -141,14 +164,24 @@ sobj * sobjCreateStringInt(const int64_t value){
 
 	return o;
 }
-
+sobj * sobjCreateStringFloat(const double value){
+	char buffer[50] = "\0";
+	sprintf(buffer, "%lf", value);
+	
+	return sobjCreateString(buffer);
+}
 sobj * sobjCreateList(void){
 	sobj * o = sobjCreate(SABER_LIST, (void *)fdListCreate());
 	o->encode = SABER_ENCODE_DLIST;
 
 	return o;
 }
+sobj * sobjCreateHash(void){
+	sobj * o = sobjCreate(SABER_HASH, (void *)fdictCreate());
+	o->encode = SABER_ENCODE_DICT;
 
+	return o;
+}
 sobj * sobjCreateSort(void){
 	sobj * o = sobjCreate(SABER_SORT, (void *)fintsetCreate());
 	/* use intset first,
@@ -172,71 +205,125 @@ void sobjFree(sobj * o){
 	switch(o->encode){
 	case SABER_ENCODE_STRING :
 		fstrFree((fstr *)o->value);
-		free(o);
 		break;
 	case SABER_ENCODE_INTEGER :
-		free(o);
 		break;
 	case SABER_ENCODE_DLIST :
 		fdListFree((fdList *)o->value);
-		free(o);
 		break;
 	case SABER_ENCODE_BINTREE :
 		fbintreeFree((fbintree *)o->value);
-		free(o);
 		break;
 	case SABER_ENCODE_INTSET :
 		fintsetFree((fintset *)o->value);
-		free(o);
 		break;
-	case SABER_ENCODE_HASH :
+	case SABER_ENCODE_DICT :
 		fdictFree((fdict *)o->value);
-		free(o);
 		break;
-	default:break;
+	}
+	free(o);
+}
+
+sobj * sobjDup(sobj * o){
+	sobj * new;
+	
+	if(!o) return NULL;
+
+	if(!(new = malloc(sizeof(sobj)))) return NULL;
+	new->type = o->type;
+	new->encode = o->encode;
+	
+	switch(o->encode){
+	case SABER_ENCODE_STRING :
+		new->value = fstrDup((fstr *)o->value);
+		return new;
+	case SABER_ENCODE_INTEGER :
+		new->value = o->value;
+		return new;
+	default:
+		free(new);
+		return NULL;
 	}
 }
 
-sobj * sobjCreateHash(void){
-	sobj * o = sobjCreate(SABER_HASH, (void *)fdictCreate());
-	o->encode = SABER_ENCODE_HASH;
-
-	return o;
+/* convert sobj to number which encode is string or integer,
+** if string could convert to number
+** then value out put to 'value',
+** if success, return 1, else return 0 */
+int sobjToInt(sobj * o, int64_t * value){
+	if(SABER_ENCODE_INTEGER == o->encode){
+		if(value) *value = (int)o->value;
+		
+	}else if(SABER_ENCODE_STRING == o->encode){
+		char * s = ((fstr*)o->value)->buf;
+		int64_t t = atoll(s);
+		if(0 == t){/* judge if it contains charactors */
+			if(!(*s >= '0' && *s <= '9') && *s != '-')
+				return 0;
+			++s;
+			while(*s){
+				if( *s < '0' || *s > '9')
+					return 0;
+				++s;
+			}
+		}
+		
+		if(value) *value = t;
+	}else return 0;
 }
 
-
-/* hash type object */
-int hashObjAdd(sobj * o, sobj * new){
-	/* if(o->encode != SABER_HASH || */
-	/*    o->encode != SABER_HASH) return SABER_WRONGTYPE; */
-	
-	/* return fdictAdd((fdict *)o->value, ((fdict *)new->value)->key, */
-	/* 		 &((fdict *)new->value)->value); */
+int sobjCmp(sobj * a, sobj * b){
+	if(a->encode != b->encode)
+		return SABER_WRONGTYPE;
+	switch(a->encode){
+	case SABER_ENCODE_STRING:
+		return fstrCompare((fstr *)a->value, (fstr *)b->value);
+	case SABER_ENCODE_INTEGER:{
+		int32_t m = (int32_t)a->value;
+		int32_t n = (int32_t)b->value;
+		return (m < n)? -1:(m > n? 1: 0);
+	}
+	}
 }
-
 
 static void sobjInfo(sobj * o){
 	printf("\ntype:%d;encode:%d\n", o->type, o->encode);
 }
 
+#ifdef DEBUG_ALL
 int main(void){
-	SaberEngineStart();
-	EventInit();
-	EventLoopStart();
+	int re;
 	
-	/* sobj * list = sobjCreateList(); */
+	printf("Init Server Info...\n");
+	SaberEngineStart();
+	printf("Server info good!\n");
 
-	/* int value[] = {1,2,3,4,5,6,7,8,9,0}; */
-	/* for(int i = 0; i < 10; ++i){ */
-	/* 	listObjPushHead(list, sobjCreateStringInt(value[i])); */
-	/* } */
-	/* fdListInfo((fdList *)list->value); */
-	/* sobj * p; */
-	/* p = listObjGetIndex(list, 0); */
-	/* if(p) printf("p value:%d\n", (int)p->value); */
-	/* else printf("p is null\n"); */
+	printf("Recoverying local storage...\n");
+	re = PersistRecovery();
+	if(!re) printf("Local storage recoveried wrong!\n");
+	else printf("Local storage good!\n");
 
-	/* int re = fdListRemove(list, &value[0], 1, 2); */
-	/* printf("result num:%d\n", re); */
-	/* fdListInfo(list); */
+	printf("Init Event Info...\n");
+	re = EventInit();
+	if(!re){
+		printf("Event info wrong!\nSaberEngine init falid, exit!\n");
+		return 0;
+	}
+	printf("Event info good!\n");
+
+	printf("Init persistence process...\n");
+	PersistStart();
+	printf("Persistence process good!\n");
+
+	printf("Init eventing loop...\n");
+	EventLoopStart();
+
+	printf("SaberEngine exit!ByeBye!\n");
+
+	/* sobj * o = sobjCreateString("10"); */
+	/* int64_t n; */
+	/* re = sobjToInt(o, &n); */
+	/* if(!re) printf("faild..\n"); */
+	/* else printf("object value:%lld\n", n); */
 }
+#endif

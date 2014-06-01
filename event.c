@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <signal.h>
 #include "saber.h"
 
 static int set_noblocking(int fd){
@@ -115,8 +116,10 @@ int EventLoopStart(){
 	fdList * client_list;
 	fdListNode * client_list_node;
 
-	memset(buf, '\0', sizeof(buf));
-	do{
+	printf("Eventing loop good!\nSaberEngine initialized success!\n");
+	
+	server.event_flag = 1;
+	while(server.event_flag){
 		nfds = epoll_wait(server.epoll_fd, server.event_list,
 						  SABER_EVENT_SIZE, 50);
 		if(nfds > 0) {
@@ -129,13 +132,15 @@ int EventLoopStart(){
 			client_list = server.client_list;
 			if(sockfd == server.listen_fd){/* connect event */
 				/* read all request may be come out at same time */
-
+#ifdef DEBUG_INFO
 				printf("connect event fired!\n");
+#endif
 				while((connfd = accept(server.listen_fd,
 									   (struct sockaddr *)&addr_client,
 									   &addr_client_len)) > 0){
+#ifdef DEBUG_INFO
 					printf("accepted, connfd is:%d\n", connfd);
-					
+#endif	
 					if(client_list->len >= SABER_SERVER_CLIENT_MAX)
 						break;
 
@@ -149,38 +154,46 @@ int EventLoopStart(){
 					ip_exist = fdListGet(client_list,
 										 &addr_client.sin_addr.s_addr,
 										 &client_list_node);
+#ifdef DEBUG_INFO
 					printf("list get result:%d\n", ip_exist);
-                    /* add new one to list */
+#endif
+					/* add new one to list */
 					if(ip_exist == FDLIST_NONE){
+#ifdef DEBUG_INFO
 						printf("new client added\n");
-						
-						fdListAddHead(
-							server.client_list,
-							(void *)sclntCreate(connfd,
-												addr_client.sin_addr.s_addr));
+#endif		
+						fdListAddHead(server.client_list,
+									  (void *)sclntCreate(
+										  connfd,
+										  addr_client.sin_addr.s_addr));
 					}else{ /* change the ip with new connfd */
+#ifdef DEBUG_INFO
 						printf("got the client\n");
-						
+#endif		
 						((sclnt *)client_list_node->data)->fd = connfd;
 					}
 				}
 			}else if(server.event_list[i].events & EPOLLIN ){
 				/* read event, a connect fd will be deleted from
 				** epoll_list when reading complete */
+#ifdef DEBUG_INFO
 				printf("read event fired,buf_index:%d\n", buf_index);
+#endif
 				flag = 1;
 				while(flag){
 					buf_len = read(sockfd, buf + buf_index, SABER_RECVBUF_BLOCK);
 					if(-1 == buf_len && errno != EAGAIN){ /* error */
+#ifdef DEBUG_INFO
 						printf("read error occur\n");
-
+#endif
 						epoll_delete(server.epoll_fd, sockfd, ev);
 						clientlist_forcedelete(client_list, &sockfd);
 
 						break;
 					}else if(-1 == buf_len && errno == EAGAIN){/* completed */
+#ifdef DEBUG_INFO
 						printf("reading complete, buf_len:%d\n", buf_index);
-
+#endif
 						buf[buf_index] = '\0';
 						CommandDo(addr_client.sin_addr.s_addr, buf);
 						
@@ -188,8 +201,9 @@ int EventLoopStart(){
 
 						break;
 					}else if(0 == buf_len){ /* client shutdown */
-						printf("client shutdown\n");
-						
+#ifdef DEBUG_INFO
+							printf("client shutdown\n");
+#endif
 						epoll_delete(server.epoll_fd, sockfd, ev);
 						clientlist_forcedelete(client_list, &sockfd);
 						
@@ -197,8 +211,9 @@ int EventLoopStart(){
 					}/* else{} recevied a part of buf */
 					/* max buf size achieved */
 					if(SABER_RECVBUF_MAX - buf_index <= SABER_RECVBUF_BLOCK){
+#ifdef DEBUG_INFO
 						printf("achieved buf max, buf_index:%d\n", buf_index);
-
+#endif
 						flag = 0;
 						buf[SABER_RECVBUF_MAX] = '\0';
 						CommandDo(addr_client.sin_addr.s_addr, buf);
@@ -206,13 +221,15 @@ int EventLoopStart(){
 						epoll_setwrite(server.epoll_fd, sockfd, ev);
 					}else if(SABER_RECVBUF_BLOCK == buf_len){
 						/* still reading */
+#ifdef DEBUG_INFO
 						printf("still reading...buf_index: %d\n", buf_index);
-
+#endif
 						flag = 1;
 						buf_index += buf_len;
 					}else{/* complete */
-						printf("read buf:%s\n", buf);
-						
+#ifdef DEBUG_INFO
+							printf("read buf:%s\n", buf);
+#endif		
 						flag = 0;
 						buf[buf_len] = '\0';
 						CommandDo(addr_client.sin_addr.s_addr, buf);
@@ -223,14 +240,17 @@ int EventLoopStart(){
 				buf_index = 0;
 			}
 			if(server.event_list[i].events & EPOLLOUT){/* wirte event */
-				printf("write event fired\n");
-
+#ifdef DEBUG_INFO
+							printf("write event fired\n");
+#endif
 				client_list->CmpValFunc = listCmpFuncIp;
 				ip_exist = fdListGet(client_list,
 									 &addr_client.sin_addr.s_addr,
 									 &client_list_node);
 				if(ip_exist == FDLIST_NONE){
+#ifdef DEBUG_INFO
 					printf("client info destoryed\n");
+#endif
 					epoll_delete(server.epoll_fd, sockfd, ev);
 				}else{/* got the client info */
 					send_buf_len =
@@ -244,27 +264,31 @@ int EventLoopStart(){
 								  buf_index, send_buf_len);
 						if(-1 == buf_len && errno == EAGAIN){
                             /* writing complete */
+#ifdef DEBUG_INFO
 							printf("writing complete!\n");
-
+#endif
 							break;
 						}else if(-1 == buf_len && errno != EAGAIN){/* error */
+#ifdef DEBUG_INFO
 							printf("write error occur:%s \n", strerror(errno));
-
+#endif
 							break;
 						}else if(buf_len >= 0){/* writing, maybe complete */
+#ifdef DEBUG_INFO
 							printf("write content:%s, buf_len:%d, buf_index:%d\n",
 								   ((sclnt *)client_list_node->data)->result->buf,
 								   buf_len, buf_index);
-
+#endif
 							buf_index += buf_len;
 						}
 					}
 					buf_index = 0;
 					
 					epoll_delete(server.epoll_fd, sockfd, ev);
-					//clientlist_trydelete(client_list, &sockfd);
+					clientlist_trydelete(client_list, &sockfd);
 				}
 			}
 		}
-	}while(1);
+	}
+	kill(server.persist_pid, SIGINT);
 }

@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <time.h>
-
 #include "fdList.h"
 
 fdList * fdListCreate(void){
@@ -26,6 +26,56 @@ void fdListFree(fdList * list){
 	}
 	free(list);
 }
+/* insert a value, aorb means 'after or before',
+** aorb 1, insert value before pivot, its default
+** aorb 2, insert value after pivot ,
+** return value:
+** FDLIST_FAILD, usually caused by mem error,
+** FDLIST_NONE, pivot not exist,
+** FDLIST_OK, action done */
+int fdListInsert(fdList * list, void * value, void * pivot,
+				 const uint8_t aorb){
+	int flag = 0;
+	fdListNode * p = list->head;
+	fdListNode * new;
+	
+	while(p){
+		if(0 == fdListCmpVal(list, p->data, pivot)){
+			flag = 1;
+			break;
+		}
+		p = p->next;
+	}
+	if(!flag) return FDLIST_NONE;
+
+	if(!(new = malloc(sizeof(fdListNode)))) return FDLIST_FAILD;
+	new->data = value;
+
+	if(list->head == p && 2 != aorb){/* p first, before */
+		list->head = new;
+		new->prev = NULL;
+		new->next = p;
+		p->prev = new;
+	}else if(list->tail == p && 2 == aorb){/* p tail, after */
+		list->tail = new;
+		new->next = NULL;
+		new->prev = p;
+		p->next = new;
+	}else if(2 == aorb){/* after */
+		p->next->prev = new;
+		new->next = p->next;
+		new->prev = p;
+		p->next = new;
+	}else{/* before */
+		p->prev->next = new;
+		new->prev = p->prev;
+		new->next = p;
+		p->prev = new;
+	}
+	
+	return FDLIST_OK;
+}
+
 
 /* get a node by 'value', if not exist, return FDLIST_NONE
 ** else set p to it */
@@ -203,6 +253,7 @@ int fdListRemove(fdList * list, void * value,
 				fdListFreeVal(list, q);
 				free(q);
 				++n;
+				--list->len;
 			}
 		}
 	}else{/* count >= 0 */
@@ -218,10 +269,11 @@ int fdListRemove(fdList * list, void * value,
 				fdListFreeVal(list, q);
 				free(q);
 				++n;
+				--list->len;
 			}
 		}
 	}
-
+	
 	return n;
 }
 /* remove a node at position of 'pos', pos is 0 base,
@@ -265,21 +317,18 @@ int fdListRemoveValue(fdList * list, void * value, void ** out_val){
 	size_t i;
 	
 	p = list->head;
-
 	while(p){
 		q = p;
 		if(p->data && 0 == fdListCmpVal(list, p->data, value))
 			break;
 		p = p->next;
 	}
-
 	/* no result */
 	if(p == NULL){
 		if(out_val)
 			*out_val = NULL;
 		return FDLIST_NONE;
 	}
-	
 	/* free or store out the p->value */
 	if(out_val == NULL){
 		fdListFreeVal(list, p);
@@ -304,7 +353,7 @@ fdListIter * fdListIterCreate(fdList * list, const uint8_t direct,
 	if(fdListIsEmpty(list) || pos >= fdListLen(list))
 		return NULL;
 	
-	if(NULL == (iter = (fdListIter *)malloc(sizeof(fdListIter))))
+	if(!(iter = (fdListIter *)malloc(sizeof(fdListIter))))
 		return NULL;
 
 	iter->direct = direct;
@@ -326,7 +375,7 @@ fdListIter * fdListIterCreate(fdList * list, const uint8_t direct,
 fdListNode * fdListIterNext(fdListIter * iter){
 	fdListNode * p;
 	
-	if(NULL == iter->next){
+	if(!iter->next){
 		fdListIterCancel(iter);
 		return NULL;
 	}
@@ -388,6 +437,20 @@ fdListNode * fdListGetRandom(fdList * list, const int seed){
 	return p;
 }
 
+/**** type function ****/
+int fdListCmpInt(void * a, void * b){
+	size_t m = *(size_t *)a;
+	size_t n = *(size_t *)b;
+
+	return m > n? 1: (m < n? -1: 0);
+}
+int fdListCmpStr(void * a, void * b){
+	return strcmp((char *)a, (char *)b);
+}
+int fdListCmpCaseStr(void * a, void * b){
+	return strcasecmp((char *)a, (char *)b);
+}
+
 void fdListInfo(fdList * p){
     if(p == NULL){
         printf("null\n");
@@ -396,16 +459,17 @@ void fdListInfo(fdList * p){
     fdListNode * iter = p->head;
     printf("next:");
     while(iter){
-        printf("%d->", (int)iter->data);
+        /* printf("%d->", (int)iter->data); */
+		printf("%d->", *(int *)iter->data);
         iter = iter->next;
     }
-	printf("null\n");
-    /* printf("null;\nprev:"); */
-    /* iter = p->tail; */
-    /* while(iter){ */
-    /*     printf("%d->", *((int *)(iter->data))); */
-    /*     iter = iter->prev; */
-    /* } */
-    /* printf("null;length:%u\n", p->len); */
+	/* printf("null\n"); */
+    printf("null;\nprev:");
+    iter = p->tail;
+    while(iter){
+        printf("%d->", *((int *)(iter->data)));
+        iter = iter->prev;
+    }
+    printf("null;length:%u\n", p->len);
 	printf("length:%u\n", p->len);
 }

@@ -1,7 +1,8 @@
 objs = fstr.o fdList.o fdict.o fintset.o fbintree.o fheap.o \
-client.o listType.o command.o table.o event.o common.o
+client.o command.o table.o event.o common.o persist.o \
+listType.o hashType.o
 
-cc = gcc -m32 -g -std=c99
+cc = gcc -m32 -g -std=c99 -D_XOPEN_SOURCE
 target = saber
 
 $(target): saber.h $(objs)
@@ -22,8 +23,6 @@ fheap.o: fheap.h
 ########### saber.h split into many files to implement #########
 client.o: saber.h
 	$(cc) -c client.c
-listType.o: saber.h
-	$(cc) -c listType.c
 command.o: saber.h
 	$(cc) -c command.c
 table.o: saber.h
@@ -32,7 +31,14 @@ event.o: saber.h
 	$(cc) -c event.c
 common.o: common.h
 	$(cc) -c common.c
+persist.o: saber.h
+	$(cc) -c persist.c
+listType.o: saber.h
+	$(cc) -c listType.c
+hashType.o: saber.h
+	$(cc) -c hashType.c
 
 .PHONY: clean
 clean: 
-	-rm -f *.o $(target)
+	-rm -f *.o
+	-rm -f $(target)

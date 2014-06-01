@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <ctype.h>
-#include <pthread.h>
 #include <time.h>
 #include "fdict.h"
 
@@ -19,24 +19,113 @@ static void _RehashStep(fdict *, const unsigned int);
 unsigned int _IntHash(void * key);
 unsigned int _GenHash(void *buf);
 unsigned int _GenCaseHash(void *buf);
-int _StrCmp(void * str1, void * str2);
-int _IntCmp(void * a, void * b);
-int _IntCmpKey(void * a, void * b);
-void * _StrDup(void * str);
-void * _IntDup(void * str);
-void _StrFree(void * str);
 
+/****************Type Functions *****************/
+int _IntCmpKey(void * key, void * value){
+	int a = (int)key;
+	int b = *(int *)value;
+	return a > b? 1: (a < b? -1: 0);
+}
+int _IntCmp(void * av, void * bv){
+	int a = *(int *)av;
+	int b = *(int *)bv;
+	return a > b? 1: (a < b? -1: 0);
+}
+int _StrCmp(void * str1, void * str2){
+    return strcmp((char *)str1, (char *)str2);
+}
+int _StrCaseCmp(void * str1, void * str2){
+	return strcasecmp((char *)str1, (char *)str2);
+}
+void _IntSet(dictNode * node, void * i){
+	node->value.s64 = *(int64_t *)i;
+}
+void _FloatSet(dictNode * node, void * f){
+	node->value.f64 = *(double *)f;
+}
+void _StrSet(dictNode * node, void * str){
+	int len = strlen((char*)str);
+	if(!(node->value.val = malloc(sizeof(len) + 1))) return;
+	cpystr((char*)node->value.val, (char*)str, len);
+}
+void * _StrDup(void * str){
+    int len = strlen((char*)str);
+    char * p = NULL;
+    if(!(p = malloc(sizeof(len) + 1))) return NULL;
+    cpystr((char*)p, (char*)str, len);
+    
+    return p;
+}
+void * _IntDup(void * str){
+	return (void *)(*(int *)str);
+}
+void _StrFree(void * str){
+    free(str);
+}
 dictType dictTypeDupKeyVal =
-{_GenHash, _StrCmp, _StrDup, _StrDup, _StrFree, _StrFree};  
+{_GenHash, _StrCmp, _StrDup, _StrSet, _StrFree, _StrFree};  
 dictType dictTypeDupKey =
 {_GenHash, _StrCmp, _StrDup, NULL, _StrFree, NULL};  
 dictType dictTypeLnkKeyVal =
 {_GenHash, _StrCmp, NULL, NULL,	NULL, NULL};
 dictType dictTypeCmdTable =
-{_GenCaseHash, _StrCmp, NULL, NULL, NULL, NULL};
+{_GenCaseHash, _StrCaseCmp, NULL, NULL, NULL, NULL};
+/* key is ip(unsigned int) cast to int, value is pointer */
 dictType dictTypeSvrTable =
 {_IntHash, _IntCmpKey, _IntDup, NULL, NULL, NULL};
+/* key is string */
+dictType dictTypeStabTable = 
+{_GenHash, _StrCmp, NULL, NULL, NULL, NULL};
 
+/*************** Hash *********************/
+void fdictSetHashSeed(const int seed){
+    fdict_hash_seed = seed;
+}
+int fdictGetHashSeed(void){
+    return fdict_hash_seed;
+}
+void fdictSetRandSeed(const int seed){
+	fdict_rand_seed = seed;
+}
+int fdictGetRandSeed(void){
+	return fdict_rand_seed;
+}
+
+/* Thomas Wang's 32 bit Mix Function */
+unsigned int _IntHash(void * k)
+{
+	unsigned int key = (int)k;
+	
+    key += ~(key << 15);
+    key ^=  (key >> 10);
+    key +=  (key << 3);
+    key ^=  (key >> 6);
+    key += ~(key << 11);
+    key ^=  (key >> 16);
+    return key;
+}
+
+/* djb hash */
+unsigned int _GenHash(void * buf) {
+    unsigned int hash = (unsigned int)fdict_hash_seed;
+	unsigned char * p = (unsigned char *)buf;
+    
+    while (*p) /* hash = hash * 33 + c */
+	    hash = ((hash << 5) + hash) + *p++; 
+
+	return hash;
+}
+/* case insensitive hash function (based on djb hash) */
+unsigned int _GenCaseHash(void * buf) {
+    unsigned int hash = (unsigned int)fdict_hash_seed;
+	unsigned char * p = (unsigned char *)buf;
+    
+    while (*p) /* hash * 33 + c */
+		hash = ((hash << 5) + hash) + (tolower(*p++)); 
+	return hash;
+}
+
+/****************** API Implementations ********************/
 static void _ResetHeader(dictHeader * header){
     header->table = NULL;
     header->size = 0;
@@ -50,7 +139,7 @@ static void _ReleaseHeader(dictHeader * header){
 /*create a fdict */
 fdict * fdictCreate(){
     fdict * dict;
-    if(!(dict = (fdict *)malloc(sizeof(fdict)))) return NULL;
+    if(!(dict = malloc(sizeof(fdict)))) return NULL;
     
     _ResetHeader(&dict->header[1]);
     _ResetHeader(&dict->header[0]);
@@ -80,63 +169,15 @@ void fdictFree(fdict * dict){
 	free(dict);
 }
 
-/***************Hash***********************************************************/
-void fdictSetHashSeed(const int seed){
-    fdict_hash_seed = seed;
-}
-int fdictGetHashSeed(void){
-    return fdict_hash_seed;
-}
-void fdictSetRandSeed(const int seed){
-	fdict_rand_seed = seed;
-}
-int fdictGetRandSeed(void){
-	return fdict_rand_seed;
-}
-
-/* Thomas Wang's 32 bit Mix Function */
-unsigned int _IntHash(void * k)
-{
-	unsigned int key = *(int *)k;
-	
-    key += ~(key << 15);
-    key ^=  (key >> 10);
-    key +=  (key << 3);
-    key ^=  (key >> 6);
-    key += ~(key << 11);
-    key ^=  (key >> 16);
-    return key;
-}
-
-/* djb hash */
-unsigned int _GenHash(void * buf) {
-    unsigned int hash = (unsigned int)fdict_hash_seed;
-	unsigned char * p = (unsigned char *)buf;
-    
-    while (*p)
-	    hash = ((hash << 5) + hash) + *p++; /* hash = hash * 33 + c */
-
-	return hash;
-}
-/* case insensitive hash function (based on djb hash) */
-unsigned int _GenCaseHash(void * buf) {
-    unsigned int hash = (unsigned int)fdict_hash_seed;
-	unsigned char * p = (unsigned char *)buf;
-    
-    while (*p)
-		hash = ((hash << 5) + hash) + (tolower(*p++)); /* hash * 33 + c */
-	return hash;
-}
-
-/************* API Implementations ********************************************/
 static void _RehashStep(fdict * dict, const unsigned int step){
-    if(!fdictIsRehash(dict) || step <= 0) return;
-    
-    dictHeader * org = &dict->header[0];
+	dictHeader * org = &dict->header[0];
     dictHeader * new = &dict->header[1];
     dictNode * p;
     size_t index;
-    int i = 0; 
+    int i = 0;
+
+	if(!fdictIsRehash(dict) || step == 0) return;
+    
     while(i < step){
         p = org->table[dict->rehash_index];
         while(p && i < step){
@@ -145,13 +186,15 @@ static void _RehashStep(fdict * dict, const unsigned int step){
             p->next = new->table[index];
             new->table[index] = p;
             p = org->table[dict->rehash_index];
-            
+
+			--org->used;
             ++new->used;
             ++i;
-        }//rehash complete
+        }
         if(org->table[dict->rehash_index]) continue;
         
         do{
+			/* rehash complete */
             if(++dict->rehash_index >= org->size){
                 dict->rehash_index = -1;
                 
@@ -171,26 +214,29 @@ static int _Expand(fdict * dict, const size_t len){
     
     dictHeader * h = &dict->header[1];
     dictNode ** new = NULL;
-    if(!(new = (dictNode **)malloc(len * sizeof(dictNode *)))) return 0;
+    if(!(new = malloc(len * sizeof(dictNode *)))) return 0;
     memset(new, 0, len * sizeof(dictNode *));
+
     h->table = new;
     h->size = len;
     h->size_mask = len - 1;
     h->used = 0;
     
     dict->rehash_index = 0;
-    //_RehashStep(dict);
+    _RehashStep(dict, 1);
 }
 
-/* find the key, if not exist, then the "index" stores the key index */
-static dictNode * _Find(fdict * dict, void * key, unsigned int * hash){
+/* find the key, the "hash" stores the key hash value */
+static dictNode * _Find(fdict * dict, void * key,
+						unsigned int * hash){
     dictHeader * h = &dict->header[0];
 	dictNode * p;
 	unsigned int result;
+	int flag, hflag = 1;
 	
     /* fisrt memeroy allocation */
     if(h->size <= 0){
-        if(!(h->table = (dictNode **)malloc(FDICT_HEADER_INITIAL_SIZE *
+        if(!(h->table = malloc(FDICT_HEADER_INITIAL_SIZE *
                         sizeof(dictNode *))))
             return 0;
         memset(h->table, 0,
@@ -201,7 +247,7 @@ static dictNode * _Find(fdict * dict, void * key, unsigned int * hash){
 	
     result = fdictHash(dict, key);
     if(hash) *hash = result;
-
+	
 	do {
 		p = h->table[(unsigned int)(h->size_mask & result)];
 		while(p){
@@ -209,11 +255,13 @@ static dictNode * _Find(fdict * dict, void * key, unsigned int * hash){
 				return p;
 			p = p->next;
 		}
-		if(fdictIsRehash(dict)){
+		flag = 0;
+		if(fdictIsRehash(dict) && hflag){
 			h = &dict->header[1];
-			continue;
+			flag = 1;
+			hflag = 0;
 		}
-	}while(0);
+	}while(flag);
 	
     return NULL;
 }
@@ -223,13 +271,12 @@ static dictNode * _Find(fdict * dict, void * key, unsigned int * hash){
 int fdictAddRaw(fdict * dict , const unsigned int hash,
 				void * key, void * value){
     dictHeader * h;
-    if(fdictIsRehash(dict)){
-        h = &dict->header[1];
-        //_RehashStep(dict);
-    }else h = &dict->header[0];
+    if(fdictIsRehash(dict))
+		h = &dict->header[1];
+    else h = &dict->header[0];
     
     /* fisrt memeroy allocation */
-    if(h->size <= 0){
+    if(fdictIsEmpty(dict)){
         if(!(h->table = malloc(FDICT_HEADER_INITIAL_SIZE *
 							   sizeof(dictNode *))))
             return FDICT_FAILD;
@@ -245,19 +292,22 @@ int fdictAddRaw(fdict * dict , const unsigned int hash,
 		return FDICT_FAILD;/* allocate one */
 	
 	fdictSetKey(dict, new, key);
-	if(dict->type->DupKey != _IntDup
-	   && !new->key){/* key never be null if key is string */
-        free(new);
+	/* key never be null if key is string */
+	if(dict->type->DupKey == _StrDup && !new->key){
+		free(new);
         return FDICT_FAILD;
     }
 	
     fdictSetVal(dict, new, value);
-    new->next = NULL;
 
     new->next = h->table[index];
     h->table[index] = new;
-    
-    ++h->used;
+
+	if(fdictIsRehash(dict)) _RehashStep(dict, 1);
+
+	
+    if(++h->used >= h->size);
+		/* _Expand(dict, h->size << 1); */
     
     return FDICT_OK;
 }
@@ -283,6 +333,8 @@ int fdictReplace(fdict * dict, void * key, void * value){
     return 1;
 }
 
+/* change value,if not exist, add new one */
+/* !!!!!!!bug!!!!!!! */
 int fdictSet(fdict * dict, void * key, void * value){
     unsigned int hash;
     dictNode * p = _Find(dict, key, &hash);
@@ -295,17 +347,18 @@ int fdictSet(fdict * dict, void * key, void * value){
     return FDICT_OK;
 }
 
-void fdictRemove(fdict * dict, void * key){
+int fdictRemove(fdict * dict, void * key){
     dictNode * p;
-    if(!(p = fdictPop(dict, key))) return;
+    if(!(p = fdictPop(dict, key))) return FDICT_NONE;
     
     fdictFreeKey(dict, p);
     fdictFreeVal(dict, p);
 
-    return;
+    return FDICT_OK;
 }
 
-/* pop a node, the memory should be controlled  by caller manually */
+/* pop a node,
+** the memory should be controlled by caller manually */
 dictNode * fdictPop(fdict * dict, void * key){
     dictHeader * h = NULL;
     if(fdictIsRehash(dict)) h = &dict->header[1];
@@ -342,7 +395,7 @@ dictNode * fdictGetAt(fdict * dict, const size_t index){
 	
 	if(index >= real_size) return NULL;
 
-	iter = fdictIterCreate(dict, NULL);
+	iter = fdictIterCreate(dict, 0);
 	for(i = 0; i < index; ++i)
 		iter = fdictIterNext(dict, iter);
 
@@ -357,69 +410,87 @@ dictNode * fdictGetRandom(fdict * dict){
 	return fdictGetAt(dict, rand() % real_size);
 }
 
-/***** iterator implement ******/
-dictIter * fdictIterCreate(fdict * dict, char * key){
-	size_t i;
+/**************** iterator implement ******************/
+/* pos is index of node where starting iter */
+dictIter * fdictIterCreate(fdict * dict, size_t pos){
+	size_t i, level = 0;
 	dictIter * iter;
 	dictHeader * h = &dict->header[0];
+	
+	if(pos >= h->used){
+		level = h->size;
+		pos -= h->used;
+		h = &dict->header[1];
+		if(pos >= h->used)
+			return NULL; /* out of range */
+	}
+	if(!(iter = malloc(sizeof(dictIter)))) return NULL;
 
-	if(h->used <= 0) return NULL;
-	if(NULL == (iter = (dictIter *)malloc(sizeof(dictIter)))) return NULL;
+	for(i = 0; i < h->size; ++i){
+		if(!h->table[i]) continue;
+		else break;
+	}
 	
 	iter->no = 0;
-	for(i = 0; i < h->size; ){
-		if(!h->table[i]){
-			++i;
-		}else{
-			iter->current = h->table[i];
-			if(key){
-				while(iter->current){
-					if(dict->type->CmpKeys((void *)key,
-										   (void *)iter->current->key) == 0){
-						__sync_add_and_fetch(&dict->iter_num, 1);
-						iter->iter_index = i;
-						return iter;
-					}
-					iter->current = iter->current->next;
-					++iter->no;
-				}
-				++i;
-			}else{
-				__sync_add_and_fetch(&dict->iter_num, 1);
-				iter->iter_index = i;
-				return iter;
-			}
-		}
-	}
-	return NULL;
+	iter->iter_index = i + level;
+	iter->current = h->table[i];
+	
+	/* for(i = 0; i < pos; ++i) */
+	/* 	iter = fdictIterNext(dict, iter); */
+	
+	return iter;
 }
 
 dictIter * fdictIterNext(fdict * dict, dictIter * iter){
-	size_t i;
-	dictHeader * h = &dict->header[0];
-	int flag = 0;
+	dictHeader * h;
+	int flag = 0, hflag = 1;
+	size_t i, level = 0;
+
 	if(!iter) return NULL;
-	
-	for(i = iter->iter_index; i < h->size; ){
+	/* no more */
+	if(iter->no >= dict->header[0].used + dict->header[1].used-1){
+		free(iter);
+		return NULL;
+	}
+
+	h = &dict->header[0];
+	if(iter->iter_index >= h->size){
+		level = h->size;
+		h = &dict->header[1];
+		hflag = 0;
+	}
+
+	for(i = iter->iter_index - level; i < h->size; ){
 		if(!h->table[i]){
 			++i;
+			continue;
+		}
+		
+		if(flag == 1){
+			iter->current = h->table[i];
+			iter->iter_index = i + level;
+			++iter->no;
+			return iter;
+		}
+		
+		if(iter->current->next){
+			iter->current = iter->current->next;
+			iter->iter_index = i + level;
+			++iter->no;
+			return iter;
 		}else{
-			if(flag == 1){
-				iter->current = h->table[i];
-				iter->iter_index = i;
-				++iter->no;
-				return iter;
-			}
-			if(iter->current->next){
-				iter->current = iter->current->next;
-				++iter->no;
-				return iter;
-			}else{
-				++i;
-				flag = 1;
-			}
+			++i;
+			flag = 1;
+		}
+
+		if(i == h->size && fdictIsRehash(dict) && hflag){
+			h = &dict->header[1];
+			hflag = 0;
+			i = 0;
+			level = dict->header[0].size;
 		}
 	}
+	
 	/* iteration complete */
 	fdictIterCancel(dict, iter);
 	return NULL;
@@ -430,38 +501,7 @@ void fdictIterCancel(fdict * dict, dictIter * iter){
 	free(iter);
 }
 
-/****************Type Functions ***********************************************/
-int _IntCmpKey(void * key, void * value){
-	int a = (int)key;
-	int b = *(int *)value;
-	return a > b? 1: (a < b? -1: 0);
-}
-int _IntCmp(void * av, void * bv){
-	int a = *(int *)av;
-	int b = *(int *)bv;
-	return a > b? 1: (a < b? -1: 0);
-}
-int _StrCmp(void * str1, void * str2){
-    return strcmp((char *)str1, (char *)str2);
-}
-
-void * _IntDup(void * i){
-	return (void *)(*(int *)i);
-}
-void * _StrDup(void * str){
-    int len = strlen(str);
-    char * p = NULL;
-    if(!(p = (char *)malloc(sizeof(len) + 1))) return NULL;
-    memcpy(p, str, len);
-    p[len] = '\0';
-
-    return p;
-}
-void _StrFree(void * str){
-    free(str);
-}
-
-/****************Test use *****************************************************/
+/****************Test use ******************/
 void fdictInfo(fdict * dict){
     printf("rehash_index:%d; iter_num:%d\n", dict->rehash_index,
 		   dict->iter_num);
@@ -472,7 +512,7 @@ void fdictInfo(fdict * dict){
         
         for(int i = 0; i < h->size; ++i){
             dictNode * p = h->table[i];
-            printf("%4d(p:%10d):", i, (int)p);
+            printf("%4d(p:%9d):", i, (int)p);
             while(p){
                 printf("%s:%d->", (char *)p->key, (int)&p->value);
                 p = p->next;
@@ -481,76 +521,60 @@ void fdictInfo(fdict * dict){
         }
     }
 }
-
-#ifndef ALL_DEBUG
-#define FDICT_DEBUG
-/* void * thread_func(void * arg); */
-/* int main(){ */    
-/*     fdict * dict = fdictCreate(); */
-/*     dict->type = &typeLnkKeyVal; */
+//#define DEBUG_FDICT 1
+#ifdef DEBUG_FDICT
+int main(){    
+    fdict * dict = fdictCreate();
+    dict->type = &dictTypeDupKey;
     
-/*     //srand(time(NULL)); */
-/*     fdictSetHashSeed(rand()); */
-/*     fdictAdd(dict, "fdf", "collapse"); */
-/*     fdictAdd(dict, "fda78", "213213"); */
-/*     fdictAdd(dict, "fdha72", "futali"); */
-/*     fdictSet(dict, "I*#", "fdafdaf"); */
-/*     fdictAdd(dict, "4", "jodandesu"); */
-/*     fdictInfo(dict); */
-/*     //_Expand(dict, 8); */
-/*     //_RehashStep(dict, 10); */
-/*     //printf("replace:%d\n",fdictReplace(dict, "22222222", "fdafda")); */
-/*     //printf("replace:%d\n",fdictReplace(dict, "33333", "333333")); */
-/*     //fdictInfo(dict); */
+    //srand(time(NULL));
+    fdictAdd(dict, "count:1", "collapse");
+    fdictAdd(dict, "count:2", "213213");
+    fdictAdd(dict, "count:3", "futali");
+	fdictAdd(dict, "count:4", "fdafdaf");
+    fdictAdd(dict, "count:5", "jodandesu");
+	fdictAdd(dict, "count:6", "fdafdaf");
+	fdictAdd(dict, "count:7", "jodandesu");
+//	fdictAdd(dict, "count:8", "jodandesu");
+//	fdictAdd(dict, "count:8", "jodandesu");
+	
+	fdictInfo(dict);
+    //_Expand(dict, 8);
+    //_RehashStep(dict, 10);
+    //printf("replace:%d\n",fdictReplace(dict, "22222222", "fdafda"));
+    //printf("replace:%d\n",fdictReplace(dict, "33333", "333333"));
+    //fdictInfo(dict);
     
-/*     //fdictRemove(dict, "22222222"); */
-/*     //fdictInfo(dict); */
+    //fdictRemove(dict, "22222222");
+    //fdictInfo(dict);
     
-/*     //fdictInfo(dict); */
+    //fdictInfo(dict);
 	
-/* 	pthread_t tid; */
-	
-/* 	//if((pthread_create(&tid, NULL, thread_func, (void *)dict))){ */
-/* 	//	printf("thread error\n"); */
-/* 	//} */
+	/* dictIter * iter = fdictIterCreate(dict, 0); */
 
-/* 	dictIter * iter = fdictIterCreate(dict, NULL); */
+	/* if(!iter){ */
+	/* 	printf("out of range\n"); */
+	/* 	return 0; */
+	/* }	 */
+	/* printf("%u:%s-%s\n", iter->iter_index, */
+	/* 	   (char *)iter->current->key, */
+	/* 	   (char *)iter->current->value.val); */
+	/* while((iter = fdictIterNext(dict, iter))){ */
+	/* 	printf("%u:%s-%s\n", iter->iter_index, */
+	/* 		   (char *)iter->current->key, */
+	/* 	   (char *)iter->current->value.val); */
+	/* } */
 
+	/* for(int i = 0; i < 4; ++i){ */
+	/* 	fdictSetRandSeed(time(NULL)); */
+	/* 	sleep(1); */
+	/* 	dictNode * s = fdictGetRandom(dict); */
+	/* 	if(s){ */
+	/* 		printf("%s-%s\n", (char *)s->key, */
+	/* 			   (char *)s->value.val); */
+	/* 	} */
+	/* } */
 	
-/* 	printf("%ul:%s-%s\n", iter->no, (char *)iter->current->key, */
-/* 		   (char *)iter->current->value.val); */
-/* 	while((iter = fdictIterNext(dict, iter))){ */
-/* 		printf("%ul:%s-%s\n", iter->no, (char *)iter->current->key, */
-/* 		   (char *)iter->current->value.val); */
-/* 		//break; */
-/* 	} */
-
-/* 	for(int i = 0; i < 4; ++i){ */
-/* 		fdictSetRandSeed(time(NULL)); */
-/* 		sleep(1); */
-/* 		dictNode * s = fdictGetRandom(dict); */
-/* 		if(s){ */
-/* 			printf("%s-%s\n", (char *)s->key, (char *)s->value.val); */
-/* 		} */
-/* 	} */
-	
-/*     return 0; */
-/* } */
-/* void * thread_func(void * arg){ */
-/* 	fdict * dict = (fdict *)arg; */
-/* 	dictIter * iter = fdictIterCreate(dict, NULL); */
-
-	
-/* 	printf("%ul:%s-%s\n", iter->no, (char *)iter->current->key, */
-/* 		   (char *)iter->current->value.val); */
-/* 	while((iter = fdictIterNext(dict, iter))){ */
-/* 		printf("%ul:%s-%s\n", iter->no, (char *)iter->current->key, */
-/* 		   (char *)iter->current->value.val); */
-/* 		//break; */
-/* 	} */
-
-	
-	
-/* 	return (void *)0; */
-/* } */
+    return 0;
+}
 #endif

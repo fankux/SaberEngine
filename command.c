@@ -5,16 +5,28 @@
 
 scmd command_list[] = {
 	/* list commands */
-	{"LPUSH", 0x01, 2, LPushCmd, 1, 1, 0},
-	{"RPUSH", 0x01, 2, RPushCmd, 1, 1, 0},
-	{"LPOP" , 0x02, 1, LPopCmd, 0, 0, 0},
-	{"RPOP" , 0x02, 1, LPopCmd, 0, 0, 0},
-	{"LSET" , 0x03, 3, LSetCmd, 0, 0, 0},
-	{"LLEN" , 0x00, 1, LLenCmd, 0, 0, 0},
-	{"LINS" , 0x01, 2, LInsCmd, 1, 2, 0},
-	{"LREM" , 0x02, 3, LRemCmd, 1, 3, 0},
-	{"LIDX" , 0x00, 2, LIdxCmd, 0, 0, 0},
-	{"LRNG" , 0x00, 4, LRngCmd, 1, 4, 0},
+	{"LPUSH", 0x01, 2, LPushCmd},
+	{"RPUSH", 0x01, 2, RPushCmd},
+	{"LPOP" , 0x02, 1, LPopCmd},
+	{"RPOP" , 0x02, 1, LPopCmd},
+	{"LSET" , 0x03, 3, LSetCmd},
+	{"LLEN" , 0x00, 1, LLenCmd},
+	{"LINS" , 0x01, 2, LInsCmd},
+	{"LREM" , 0x02, 3, LRemCmd},
+	{"LIDX" , 0x00, 2, LIdxCmd},
+	{"LRNG" , 0x00, 3, LRngCmd},
+	/* hash commands */
+	{"HSET" , 0x03, 3, HSetCmd},
+	{"HSETX", 0x03, 3, HSetXstCmd},
+	{"HGET" , 0x00, 2, HGetCmd},
+	{"HGETM", 0x00, 3, HGetMCmd},
+	{"HGETA", 0x00, 1, HGetACmd},
+	{"HDEL" , 0x02, 2, HDelCmd},
+	{"HLEN" , 0x00, 1, HLenCmd},
+	{"HXST" , 0x00, 2, HXstCmd},
+	{"HKEYS", 0x00, 1, HKeysCmd},
+	{"HVALS", 0x00, 1, HValsCmd},
+	{"HINCR" ,0x03, 3, HIncrCmd},
 };
 
 /* sort the command list by type field, it's a mask,
@@ -27,19 +39,24 @@ scmd command_list[] = {
 ** 11(0x03), set command, may modify memory using,
 ** bit 3, system command, would modify some system setting */
 void CommandCat(){
-	int cmd_list_len = sizeof(command_list) / sizeof(command_list[0]);
-	int i;
+	int i, cmd_list_len = sizeof(command_list) /
+		sizeof(command_list[0]);
 	scmd * p;
-	int re;
 	
 	for(i = 0; i < cmd_list_len; ++i){
 		p = command_list + i;
-		re = fdictAdd(server.command, p->name, p);
+		fdictAdd(server.command, p->name, p);
 	}
 }
 
+/* judge if this command would modify memory use
+** if memory sensetive, return 1, else return 0 */
+inline int CommandIsMem(scmd * cmd){
+	return (cmd->type & 3) != 0; 
+}
+
 /* decrypt command, and then re-format command
-** | ..0.. |s| ..1.. |s| ..2.. |s|.....\r\n
+** | ..0.. |s| ..1.. |s| ..2.. |s|.....
 ** 0, command strings
 ** s, spaces, unsure length of bits
 ** 1, argument 1
@@ -47,48 +64,46 @@ void CommandCat(){
 ** ..
 ** n,  argument n
 ** end up with \r\n */
-void CommandDo(unsigned long ip, char * buf){
+int CommandDo(unsigned long ip, char * buf){
 	fdListNode * client_node;
 	sclnt * client;
 	int ip_exist;
-	char * cmd;
 	dictNode * cmd_node;
 
 	server.client_list->CmpValFunc = listCmpFuncIp;
 	ip_exist = fdListGet(server.client_list, &ip, &client_node);
 	if(ip_exist == FDLIST_NONE){
 		SetResultStr(client, server.share->err_svr);
-		return;
+		return 0;
 	}else{
 		client = (sclnt *)client_node->data;
 	}
 	
 	/* get cmd */
-	while(*buf == ' ') ++buf;/* skip spaces */
-	cmd = buf;
-	while(*buf != ' ') ++buf;
-	*buf = '\0';
-	++buf;
-	printf("cmd:%s\n", cmd);
+	char * start, * next, * s = buf;
+	char key_buf[128] = "\0";
+	size_t sec_len;
+	int re;
+
+	re = ValueSplit(buf, &sec_len, &start, &next);
+	AssertUResultReturn(client, re, 1, err_cmd);
+	cpystr(key_buf, start, sec_len);
 
 	/* get cmd struct */
-	cmd_node  = fdictSearch(server.command, (void *)cmd);
+	cmd_node  = fdictSearch(server.command, (void *)key_buf);
 	AssertResultReturn(client, cmd_node, NULL, err_cmd);
 
 	if(!client->argv){
 		client->argv = malloc(client->argc_max * sizeof(char *));
 		AssertResultReturn(client, client->argv, NULL, err_mem);
 	}
-	
+
+	buf = next;
 	client->argc = 0;
-	/* get key */
-	char * start, * next;
-	char key_buf[128] = "\0";
-	size_t sec_len;
-	int re;
+	/* get key */	
 	if((re = ValueSplit(buf, &sec_len, &start, &next)) <= 0){
 		SetResultStr(client, server.share->err_cmd_syx);
-		return;
+		return 0;
 	}
 	client->argv[0] = start;
 	++client->argc;
@@ -96,18 +111,27 @@ void CommandDo(unsigned long ip, char * buf){
 	if(*next){
 		client->argv[1] = next + 1;
 		++client->argc;
-		printf("value:%s\n", next + 1);
+	}else{
+		client->argv[1] = NULL;
 	}
 	client->argv[0][sec_len] = '\0';
-	printf("key:%s\n", start);
 	
 	client->cmd = (scmd *)cmd_node->value.val;
-	client->cmd->func(client);
+	re = client->cmd->func(client);
+
+	/* if command successfully execute, persistence */
+	if(1 == re && CommandIsMem(client->cmd) && client->ip != 0){
+		client->argv[0][sec_len] = ' ';
+		re = PersistSend(s);
+	}
 
 	client->last_cmd = client->cmd;
 	client->last_action_time = time(0);
 	
-	return;
+	return 1;
+}
+void EmptyResult(sclnt * client){
+	fstrEmpty(client->result);
 }
 
 void AddResultStr(sclnt * client, char * str){
@@ -135,4 +159,59 @@ void SetResultInt(sclnt * client, size_t value){
 	sprintf(buf, "(Int)%zu\r\n", value);
 
 	client->result = fstrSet(s, buf, 0);
+}
+void AddResultSobj(sclnt * client, sobj * o){
+	char buf[30];
+	fstr * s = client->result;
+		
+	switch(o->encode){
+	case SABER_ENCODE_NULL:
+		client->result = fstrCat(s, "NULL\r\n");
+		break;
+	case SABER_ENCODE_INTEGER:
+		sprintf(buf, "(Int)%"PRId32"\r\n", (int32_t)o->value);
+		client->result = fstrCat(s, buf);
+		break;
+	case SABER_ENCODE_STRING:
+		client->result = fstrCat(s, "\"");
+		/* note that result's pointor may changed */
+		client->result = fstrCat(client->result,
+								 ((fstr*)o->value)->buf);
+		client->result = fstrCat(client->result, "\"\r\n");
+		break;
+	}
+}
+void SetResultSobj(sclnt * client, sobj * o){
+	char buf[30];
+	fstr * s = client->result;
+		
+	switch(o->encode){
+	case SABER_ENCODE_NULL:
+		client->result = fstrSet(s, "NULL\r\n", 0);
+		break;
+	case SABER_ENCODE_INTEGER:
+		sprintf(buf, "(Int)%"PRId32"\r\n", (int32_t)o->value);
+		client->result = fstrSet(s, buf, 0);
+		break;
+	case SABER_ENCODE_STRING:
+		client->result = fstrSet(s, "\"", 0);
+		client->result = fstrCat(client->result,
+								 ((fstr*)o->value)->buf);
+		client->result = fstrCat(client->result, "\"\r\n");
+		break;
+	}
+}
+void InsResultStr(sclnt * client, char * str, const size_t pos){
+	fstr * s = client->result;
+
+	client->result = fstrInsert(s, str, pos);
+
+}
+void InsResultInt(sclnt * client, size_t value, const size_t pos){
+	char buf[30] = "\0";
+	fstr * s = client->result;
+
+	sprintf(buf, "(Int)%zu\r\n", value);
+
+	client->result = fstrInsert(s, buf, pos);
 }
